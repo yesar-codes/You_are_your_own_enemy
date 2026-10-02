@@ -9,6 +9,9 @@ const ActionSpace = preload("res://scripts/action_space.gd")
 const MarkovPredictor = preload("res://scripts/markov_predictor.gd")
 const AttackPlanner = preload("res://scripts/attack_planner.gd")
 const Cfg = preload("res://scripts/game_config.gd")
+const InputBits = preload("res://scripts/input_bits.gd")
+const RunRecording = preload("res://scripts/run_recording.gd")
+const ProfileStats = preload("res://scripts/profile_stats.gd")
 
 var _failed := 0
 
@@ -130,6 +133,80 @@ func _init() -> void:
 	planner.epsilon = 1.0
 	plans = planner.plan_volley(m, [2, 2, 2, 2], start, Vector2.RIGHT, 2, 0.6)
 	_check(plans[0]["explored"] and plans[1]["explored"], "epsilon 1 always explores")
+
+	print("input bits")
+	_check(InputBits.to_vector(InputBits.UP | InputBits.RIGHT).is_equal_approx(Vector2(1, -1).normalized()), "up+right decodes diagonally")
+	_check(InputBits.to_vector(InputBits.LEFT | InputBits.RIGHT) == Vector2.ZERO, "opposite keys cancel")
+	_check(InputBits.dash_held(InputBits.DASH | InputBits.DOWN) and not InputBits.dash_held(InputBits.DOWN), "dash bit")
+
+	print("run recording")
+	var frames := PackedByteArray([0, 0, 0, 1, 1, 9, 16, 16, 16, 16, 0])
+	var rle := RunRecording.encode_rle(frames)
+	_check(rle.size() == 10, "run-length encodes repeated frames")
+	_check(RunRecording.decode_rle(rle) == frames, "RLE round trip")
+	m = MarkovPredictor.new()
+	m.context_mode = Cfg.MODE_THREAT
+	_train(m, [0, 2, 4, 2, 7, 9], 40, 3)
+	var rec := RunRecording.new()
+	rec.rng_seed = 12345
+	rec.context_mode = m.context_mode
+	rec.epsilon = 0.3
+	rec.model = m.to_dict()
+	rec.frames = frames
+	rec.ghost_frames = PackedByteArray([4, 4, 8])
+	rec.add_mode_event(3, 1)
+	# Same path the game uses: full-precision JSON on disk.
+	parsed = JSON.parse_string(JSON.stringify(rec.to_dict(), "", false, true))
+	var rec2 := RunRecording.from_dict(parsed) as RunRecording
+	_check(rec2 != null, "recording loads")
+	_check(rec2.frames == frames and rec2.ghost_frames == rec.ghost_frames, "frames and ghost frames survive")
+	_check(rec2.rng_seed == 12345 and rec2.events.size() == 1 and int(rec2.events[0][1]) == 1, "seed and events survive")
+	_check(RunRecording.from_dict({"version": 99}) == null, "rejects unknown versions")
+
+	print("replay determinism (model + seeded planner)")
+	var live := MarkovPredictor.new()
+	live.from_dict(rec.model)
+	live.context_mode = rec.context_mode
+	var replay := MarkovPredictor.new()
+	replay.from_dict(rec2.model)
+	replay.context_mode = rec2.context_mode
+	var p1 := AttackPlanner.new()
+	var p2 := AttackPlanner.new()
+	p1.rng.seed = rec.rng_seed
+	p2.rng.seed = rec2.rng_seed
+	p1.epsilon = rec.epsilon
+	p2.epsilon = rec2.epsilon
+	var identical := true
+	var ctx: Array = [0, 2, 4]
+	for i in 30:
+		var a1 := p1.plan_volley(live, ctx, start, Vector2.RIGHT, 3, 0.7, [start + Vector2(40, 0)])
+		var a2 := p2.plan_volley(replay, ctx, start, Vector2.RIGHT, 3, 0.7, [start + Vector2(40, 0)])
+		for j in a1.size():
+			if a1[j]["target"] != a2[j]["target"] or a1[j]["explored"] != a2[j]["explored"]:
+				identical = false
+		live.update(ctx, 3, i % 10)
+		replay.update(ctx, 3, i % 10)
+	_check(identical, "rebuilt model + same seed plan identical volleys")
+
+	print("profile card")
+	var prof := ProfileStats.new()
+	_check(prof.lines().is_empty(), "no habits without data")
+	for i in 20:
+		prof.record(6, 2, 1, 4)                    # threat to the right (E) -> move W
+	for i in 5:
+		prof.record(ActionSpace.DASH, 8, 0, 4, 0)  # dash North
+		prof.record(ActionSpace.IDLE, 8, 0, 4)
+	var lines := prof.lines()
+	var found_flee := false
+	var found_dash := false
+	for l in lines:
+		if str(l).contains("to your right, you move left 100%"):
+			found_flee = true
+		if str(l).contains("100% of your dashes go up"):
+			found_dash = true
+	_check(found_flee, "finds: flees left from a threat on the right")
+	_check(found_dash, "finds: favourite dash direction")
+	_check(lines.size() <= 4, "card is capped")
 
 	print("")
 	if _failed == 0:

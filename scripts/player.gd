@@ -1,18 +1,23 @@
 extends Node2D
 ## The human-controlled circle. WASD / arrows to move, Space to dash.
-## It only exposes state; the game (main.gd) samples `move_input` / `consume_dash()` at 10 Hz.
+## It never reads the keyboard itself: main.gd writes `frame_bits` every physics frame, either
+## from the keyboard or from a recorded replay. That single input path is what makes replays
+## (and the Ghost Shadow, which is this same script) exact.
+## The game samples `move_input` / `consume_dash()` at 10 Hz.
 
 const Cfg = preload("res://scripts/game_config.gd")
+const InputBits = preload("res://scripts/input_bits.gd")
 
 signal died
 
 var hp: int = Cfg.PLAYER_HP
 var alive := true
-var move_input := Vector2.ZERO      # raw input this physics frame
+var frame_bits := 0                 # InputBits for this physics frame, set by main
+var move_input := Vector2.ZERO      # decoded input this physics frame
 var facing := Vector2.RIGHT
+var dash_dir := Vector2.RIGHT       # direction of the latest dash
 
 var _dash_left := 0.0
-var _dash_dir := Vector2.RIGHT
 var _dash_cd := 0.0
 var _invuln := 0.0
 var _dash_latch := false            # set when a dash starts, cleared by consume_dash()
@@ -23,12 +28,15 @@ func reset(at: Vector2) -> void:
 	position = at
 	hp = Cfg.PLAYER_HP
 	alive = true
+	frame_bits = 0
 	move_input = Vector2.ZERO
 	facing = Vector2.RIGHT
+	dash_dir = Vector2.RIGHT
 	_dash_left = 0.0
 	_dash_cd = 0.0
 	_invuln = 0.0
 	_dash_latch = false
+	_space_was_down = false
 	queue_redraw()
 
 
@@ -52,40 +60,27 @@ func take_hit() -> void:
 func _physics_process(delta: float) -> void:
 	if not alive:
 		return
-	move_input = _read_input()
+	move_input = InputBits.to_vector(frame_bits)
 	if move_input != Vector2.ZERO:
 		facing = move_input
 
 	_dash_cd = maxf(0.0, _dash_cd - delta)
 	_invuln = maxf(0.0, _invuln - delta)
 
-	var space_down := Input.is_key_pressed(KEY_SPACE)
+	var space_down := InputBits.dash_held(frame_bits)
 	if space_down and not _space_was_down and _dash_cd <= 0.0:
 		_dash_left = Cfg.DASH_TIME
 		_dash_cd = Cfg.DASH_COOLDOWN
-		_dash_dir = facing.normalized()
+		dash_dir = facing.normalized()
 		_dash_latch = true
 	_space_was_down = space_down
 
 	var vel := move_input * Cfg.PLAYER_SPEED
 	if _dash_left > 0.0:
 		_dash_left -= delta
-		vel = _dash_dir * Cfg.DASH_SPEED
+		vel = dash_dir * Cfg.DASH_SPEED
 	position = Cfg.clamp_to_arena(position + vel * delta)
 	queue_redraw()
-
-
-func _read_input() -> Vector2:
-	var v := Vector2.ZERO
-	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
-		v.y -= 1.0
-	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
-		v.y += 1.0
-	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
-		v.x -= 1.0
-	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
-		v.x += 1.0
-	return v.normalized()
 
 
 func _draw() -> void:

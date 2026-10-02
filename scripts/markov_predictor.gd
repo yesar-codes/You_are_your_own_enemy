@@ -35,6 +35,12 @@ func reset() -> void:
 	last_order_used = "none"
 
 
+## Fold the forgetting weight back into the counts (weight becomes 1). Predictions are
+## unchanged up to rounding; the game calls it at fixed points so replays round identically.
+func normalize() -> void:
+	_rescale()
+
+
 func context_count() -> int:
 	return _counts.size()
 

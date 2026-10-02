@@ -38,6 +38,18 @@ const MODE_NAMES := ["history only", "arena zone", "threat bearing"]
 
 const ACC_WINDOW := 150                 # rolling window (ticks) for accuracy stats
 
+# --- Ghost Shadow (final boss: your best run, replayed) --------------------
+const GHOST_ROUND := 3                  # the ghost arrives when this round starts
+const GHOST_GRACE := 1.5                # seconds after spawning before it can hurt
+const GHOST_MAX_SECONDS := ROUND_SECONDS
+const GHOST_FIRE_SLOWDOWN := 1.35       # Shadow volley interval multiplier while it is out
+const GHOST_HIT_DIST := PLAYER_RADIUS * 1.7
+
+const GHOST_UNAVAILABLE := 0            # no recorded best run yet
+const GHOST_WAITING := 1
+const GHOST_ACTIVE := 2
+const GHOST_DONE := 3
+
 
 static func clamp_to_arena(p: Vector2) -> Vector2:
 	var m := Vector2(PLAYER_RADIUS, PLAYER_RADIUS)
