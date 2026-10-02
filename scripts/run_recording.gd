@@ -9,7 +9,7 @@ extends RefCounted
 ##
 ## Frames are run-length encoded for saving because input rarely changes between frames.
 
-const VERSION := 2                          # 2 = has the learning arena
+const VERSION := 3                          # 2 = learning arena, 3 = hit-stop
 
 var rng_seed := 0
 var tick_rate := 60

@@ -23,6 +23,7 @@ godot --headless --path . --script res://tests/test_predictor.gd
 | Space | dash (1.2 s cooldown) |
 | Z | cycle context mode (history only / arena zone / threat bearing) |
 | F1 | hide/show model internals |
+| M | mute sound and music |
 | R | restart run (model is kept) |
 | N | new model (wipes what it learned, the replays and the ghost) |
 | P | after game over: watch a replay of the run you just played |
@@ -68,6 +69,23 @@ recorded before this version can't be replayed any more (the simulation changed)
 can still be used as the ghost. Tunables: `ARENA_*` and `POCKET_*` in `game_config.gd`.
 Code: `scripts/arena_shaper.gd` (logic) and `scripts/arena_view.gd` (drawing).
 
+**Game feel.**
+
+- Screen shake (trauma model: shake = trauma squared, so big hits are violent and small ones subtle).
+- Hit-stop: the world freezes for 6 frames when you lose a heart.
+- Particles on strikes, hits, dashes and the ghost's arrival, plus a dash trail of afterimages.
+- Glowing telegraphs (additive halo that pulses faster just before the strike).
+- Chromatic aberration and a red vignette when you're hit (`shaders/hit_aberration.gdshader`).
+- Procedural audio, no sound files (`scripts/synth.gd`): a rising tone during each wind-up, so
+  you can dodge by ear, a deep thud on impact, and sounds for hits, dashes, reshapes, the
+  ghost and death.
+- Adaptive music: a 112 BPM loop whose layers (bass, hats, arpeggio, a dissonant pad) fade in
+  as the Shadow's prediction accuracy rises. **M** mutes.
+
+All of this is presentation only (own RNG, never read by the simulation), so replays stay
+exact. Hit-stop does pause the simulation, but only for a fixed number of frames after a
+hit, so it happens identically in a replay.
+
 **Profile card.** On game over, the card shows up to four habits the run revealed, for example
 "When a circle appears to your right, you move left 71% of the time" or "68% of your dashes
 go up". Candidates are threat reactions, behaviour when two or more circles are near, dash
@@ -98,6 +116,7 @@ much better than a uniform random guess each one predicts you
 | `scripts/game_config.gd` | Tunables and the "situation" features. |
 | `scripts/main.gd` | Game loop, observe/score/learn/predict tick, recording, replays, ghost fight, persistence. |
 | `scripts/player.gd`, `shadow.gd`, `attack.gd` | Actors. |
+| `scripts/fx.gd`, `post_fx.gd`, `synth.gd` | Particles + shake, hit shader layer, procedural sound + adaptive music. |
 | `scripts/arena_shaper.gd`, `arena_view.gd` | Learning arena: heat map, thorns, blind spot. |
 | `scripts/ghost.gd` | Ghost Shadow: the player script driven by a recorded run. |
 | `scripts/input_bits.gd` | One frame of input packed into 5 bits (the replay unit). |

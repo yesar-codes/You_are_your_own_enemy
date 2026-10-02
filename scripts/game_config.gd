@@ -56,7 +56,10 @@ const ARENA_WITHER_TIME := 1.0
 const POCKET_MIN_DIST := 220.0          # a blind spot opens at least this far from you
 const POCKET_SHELTER := 4.0             # seconds of strike immunity it holds
 
-const GHOST_UNAVAILABLE := 0           # no recorded best run yet
+# --- Game feel ----------------------------------------------------------------
+const HITSTOP_FRAMES := 6               # physics frames the world freezes when you lose a heart
+
+const GHOST_UNAVAILABLE := 0          # no recorded best run yet
 const GHOST_WAITING := 1
 const GHOST_ACTIVE := 2
 const GHOST_DONE := 3

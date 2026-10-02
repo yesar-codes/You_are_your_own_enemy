@@ -19,6 +19,13 @@ var _age := 0.0
 var _striking := false
 
 
+func _ready() -> void:
+	# Additive blending makes the halo below read as a glow on the dark arena.
+	var mat := CanvasItemMaterial.new()
+	mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+	material = mat
+
+
 func is_telegraphing() -> bool:
 	return not _striking
 
@@ -45,8 +52,18 @@ func _draw() -> void:
 	var base := Color(0.35, 0.6, 1.0) if explored else Color(1.0, 0.25, 0.3)
 	if not _striking:
 		var p := clampf(_age / windup, 0.0, 1.0)
-		draw_circle(Vector2.ZERO, radius, Color(base, 0.06 + 0.22 * p))
+		# Glow: soft rings outside the edge, brighter and faster-pulsing near the strike.
+		var pulse := 0.5 + 0.5 * sin(_age * (8.0 + 30.0 * p))
+		for i in 5:
+			var g := float(i + 1)
+			draw_arc(Vector2.ZERO, radius + g * 3.0, 0.0, TAU, 48,
+					Color(base, (0.10 + 0.18 * p * pulse) / g), 3.0)
+		draw_circle(Vector2.ZERO, radius, Color(base, 0.05 + 0.18 * p))
 		draw_arc(Vector2.ZERO, radius, 0.0, TAU, 48, Color(base, 0.9), 2.0)
 		draw_arc(Vector2.ZERO, radius * (1.0 - p), 0.0, TAU, 48, Color(base, 0.6), 1.5)
 	else:
-		draw_circle(Vector2.ZERO, radius, Color(1.0, 0.95, 0.9, 0.9))
+		var k := clampf((_age - windup) / Cfg.STRIKE_TIME, 0.0, 1.0)
+		draw_circle(Vector2.ZERO, radius * (1.0 + 0.15 * k), Color(1.0, 0.95, 0.9, 0.9 * (1.0 - 0.6 * k)))
+		for i in 4:
+			draw_arc(Vector2.ZERO, radius + float(i + 1) * 5.0 * (1.0 + k), 0.0, TAU, 48,
+					Color(base, 0.35 * (1.0 - k) / float(i + 1)), 4.0)

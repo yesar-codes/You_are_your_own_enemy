@@ -183,7 +183,7 @@ func _draw_graph(r: Rect2) -> void:
 
 func _draw_controls(x: float) -> void:
 	var y := PANEL.end.y - 66.0
-	_txt("WASD / arrows  move      Space  dash", Vector2(x, y), 12, C_DIM)
+	_txt("WASD / arrows  move    Space  dash    M  mute", Vector2(x, y), 12, C_DIM)
 	_txt("Z  cycle context mode    F1  hide/show internals", Vector2(x, y + 15.0), 12, C_DIM)
 	_txt("R  restart (model kept)    N  wipe all memory", Vector2(x, y + 30.0), 12, C_DIM)
 	_txt("P / B  watch last / best run (after game over)", Vector2(x, y + 45.0), 12, C_DIM)

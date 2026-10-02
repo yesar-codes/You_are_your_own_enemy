@@ -9,6 +9,8 @@ const Cfg = preload("res://scripts/game_config.gd")
 const InputBits = preload("res://scripts/input_bits.gd")
 
 signal died
+signal hurt                         # a hit that cost a heart (for screen shake, sound, hit-stop)
+signal dashed
 
 var hp: int = Cfg.PLAYER_HP
 var alive := true
@@ -22,6 +24,7 @@ var _dash_cd := 0.0
 var _invuln := 0.0
 var _dash_latch := false            # set when a dash starts, cleared by consume_dash()
 var _space_was_down := false
+var _afterimages: Array = []        # [world position, age]; visual only, never read by the sim
 
 
 func reset(at: Vector2) -> void:
@@ -37,6 +40,7 @@ func reset(at: Vector2) -> void:
 	_invuln = 0.0
 	_dash_latch = false
 	_space_was_down = false
+	_afterimages.clear()
 	queue_redraw()
 
 
@@ -52,6 +56,7 @@ func take_hit() -> void:
 		return
 	hp -= 1
 	_invuln = 1.0
+	hurt.emit()
 	if hp <= 0:
 		alive = false
 		died.emit()
@@ -73,17 +78,33 @@ func _physics_process(delta: float) -> void:
 		_dash_cd = Cfg.DASH_COOLDOWN
 		dash_dir = facing.normalized()
 		_dash_latch = true
+		dashed.emit()
 	_space_was_down = space_down
 
 	var vel := move_input * Cfg.PLAYER_SPEED
-	if _dash_left > 0.0:
+	var dashing := _dash_left > 0.0
+	if dashing:
 		_dash_left -= delta
 		vel = dash_dir * Cfg.DASH_SPEED
 	position = Cfg.clamp_to_arena(position + vel * delta)
+	_update_afterimages(delta, dashing)
 	queue_redraw()
 
 
+func _update_afterimages(delta: float, dashing: bool) -> void:
+	for img in _afterimages:
+		img[1] += delta
+	while not _afterimages.is_empty() and float(_afterimages[0][1]) > 0.25:
+		_afterimages.pop_front()
+	if dashing:
+		_afterimages.append([position, 0.0])
+
+
 func _draw() -> void:
+	for img in _afterimages:
+		var fade := 1.0 - float(img[1]) / 0.25
+		var p: Vector2 = img[0]
+		draw_circle(p - position, Cfg.PLAYER_RADIUS * (0.6 + 0.4 * fade), Color(0.35, 0.85, 1.0, 0.35 * fade))
 	var blink := _invuln > 0.0 and int(_invuln * 12.0) % 2 == 0
 	var col := Color(0.35, 0.85, 1.0, 0.35 if blink else 1.0)
 	draw_circle(Vector2.ZERO, Cfg.PLAYER_RADIUS, col)

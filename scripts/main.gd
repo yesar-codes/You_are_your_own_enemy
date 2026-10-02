@@ -33,6 +33,9 @@ const GhostScript = preload("res://scripts/ghost.gd")
 const ShadowScript = preload("res://scripts/shadow.gd")
 const AttackScript = preload("res://scripts/attack.gd")
 const OverlayScript = preload("res://scripts/debug_overlay.gd")
+const FxScript = preload("res://scripts/fx.gd")
+const PostFxScript = preload("res://scripts/post_fx.gd")
+const SynthScript = preload("res://scripts/synth.gd")
 
 # --- State read by the overlay ---------------------------------------------
 var model: MarkovPredictor
@@ -78,8 +81,15 @@ var profile_lines: Array = []
 var arena: ArenaShaper
 var next_reshape := Cfg.ARENA_RESHAPE_EVERY   # run_time of the next reshape
 
+var fx: FxScript
+var post_fx: PostFxScript
+var synth: SynthScript
+
 # --- Internals ----------------------------------------------------------------
 var _overlay: OverlayScript
+var _camera: Camera2D
+var _world: Node2D                      # every simulated actor; disabled during hit-stop
+var _hitstop := 0                       # physics frames of freeze left
 var _attacks_root: Node2D
 var _live_attacks: Array = []
 var _threats: Array = []                # centres of attacks that are still telegraphing
@@ -119,31 +129,58 @@ func _ready() -> void:
 	arena = ArenaShaper.new()
 	_load_state()
 
+	# Scene layout (draw order = tree order):
+	#   main (background) > camera, arena view, world [actors; frozen during hit-stop], fx
+	#   post-fx layer (chromatic aberration) > HUD layer (panel, never shakes) > synth
+	_camera = Camera2D.new()
+	_camera.anchor_mode = Camera2D.ANCHOR_MODE_FIXED_TOP_LEFT
+	add_child(_camera)
+	_camera.make_current()
+
 	var arena_view := ArenaView.new()
 	arena_view.game = self
 	add_child(arena_view)
 
+	_world = Node2D.new()
+	add_child(_world)
+
 	_attacks_root = Node2D.new()
-	add_child(_attacks_root)
+	_world.add_child(_attacks_root)
 
 	shadow = ShadowScript.new()
-	add_child(shadow)
+	_world.add_child(shadow)
 
 	player = PlayerScript.new()
-	add_child(player)
+	_world.add_child(player)
 
 	ghost = GhostScript.new()
-	add_child(ghost)
+	_world.add_child(ghost)
 	ghost.vanish()
 
+	fx = FxScript.new()
+	fx.game = self
+	fx.camera = _camera
+	add_child(fx)
+
+	post_fx = PostFxScript.new()
+	add_child(post_fx)
+
+	var hud := CanvasLayer.new()
+	hud.layer = 10
+	add_child(hud)
 	_overlay = OverlayScript.new()
 	_overlay.game = self
-	_overlay.z_index = 20
-	add_child(_overlay)
+	hud.add_child(_overlay)
+
+	synth = SynthScript.new()
+	synth.game = self
+	add_child(synth)
 
 	shadow.target = player
 	shadow.fire_requested.connect(_on_fire)
 	player.died.connect(_on_player_died)
+	player.hurt.connect(_on_player_hurt)
+	player.dashed.connect(_on_player_dashed)
 	_start_run()
 
 
@@ -186,6 +223,9 @@ func _start_run(rec: RunRecording = null) -> void:
 	round_no = 1
 	frame = 0
 	next_reshape = Cfg.ARENA_RESHAPE_EVERY
+	_hitstop = 0
+	_world.process_mode = Node.PROCESS_MODE_INHERIT
+	fx.clear()
 	_tick_acc = 0.0
 	_series_timer = 0.0
 	history.clear()
@@ -231,6 +271,13 @@ func _start_run(rec: RunRecording = null) -> void:
 
 func _physics_process(delta: float) -> void:
 	notice_age += delta
+	# Hit-stop: the whole simulation (this function and the world) skips a fixed number of
+	# frames. Hits happen at the same frames in a replay, so it freezes identically there.
+	if _hitstop > 0:
+		_hitstop -= 1
+		if _hitstop > 0:
+			return
+		_world.process_mode = Node.PROCESS_MODE_INHERIT
 	if is_over:
 		return
 
@@ -350,15 +397,24 @@ func _on_fire() -> void:
 		a.explored = p["explored"]
 		a.player = player
 		a.arena = arena
-		a.resolved.connect(_on_attack_resolved)
+		a.resolved.connect(_on_attack_resolved.bind(a))
 		a.finished.connect(_on_attack_finished.bind(a))
 		_attacks_root.add_child(a)
 		_live_attacks.append(a)
 	last_plan = plans
 	last_plan_age = 0.0
+	if not plans.is_empty():
+		synth.windup(windup)
 
 
-func _on_attack_resolved(on_target: bool) -> void:
+func _on_attack_resolved(on_target: bool, a: Node2D) -> void:
+	# Juice first (visual/audio only), then the stats.
+	synth.thud()
+	fx.shake(0.12)
+	fx.ring(a.position, Cfg.ATTACK_RADIUS, 22, Color(1.0, 0.75, 0.6))
+	if on_target and arena.shelters(player.position):
+		synth.chime()
+		fx.burst(player.position, 16, Color(0.35, 0.95, 0.75), 180.0)
 	if is_over:
 		return
 	_push(_w_atk, 1 if on_target else 0, 20)
@@ -369,7 +425,28 @@ func _on_attack_finished(a: Node) -> void:
 	_live_attacks.erase(a)
 
 
+func _on_player_hurt() -> void:
+	_hitstop = Cfg.HITSTOP_FRAMES
+	_world.process_mode = Node.PROCESS_MODE_DISABLED
+	fx.shake(0.6)
+	fx.burst(player.position, 28, Color(1.0, 0.35, 0.4), 340.0)
+	post_fx.kick(1.0)
+	synth.hit()
+
+
+func _on_player_dashed() -> void:
+	fx.burst(player.position, 10, Color(0.45, 0.85, 1.0), 120.0, 0.3, 2.0)
+	synth.whoosh()
+
+
+## Visual layers (particles) also freeze while this is true.
+func in_hitstop() -> bool:
+	return _hitstop > 0
+
+
 func _on_player_died() -> void:
+	fx.shake(1.0)
+	synth.death()
 	is_over = true
 	shadow.active = false
 	if ghost_state == Cfg.GHOST_ACTIVE:
@@ -422,6 +499,9 @@ func _update_ghost(delta: float) -> void:
 			ghost_state = Cfg.GHOST_ACTIVE
 			ghost.spawn(Cfg.ARENA.get_center())
 			_refresh_interval()
+			synth.drone()
+			fx.shake(0.4)
+			fx.burst(ghost.position, 40, Color(0.8, 0.55, 1.0), 300.0, 0.7)
 			_say("YOUR BEST RUN HAS COME BACK FOR YOU")
 	elif ghost_state == Cfg.GHOST_ACTIVE:
 		if _ghost_i >= _ghost_frames.size():
@@ -455,6 +535,8 @@ func _update_arena(delta: float) -> void:
 		next_reshape += Cfg.ARENA_RESHAPE_EVERY
 		var had_thorns := not arena.thorns.is_empty()
 		arena.reshape(player.position)
+		synth.rumble()
+		fx.shake(0.25)
 		if not had_thorns and not arena.thorns.is_empty():
 			_say("THE ARENA IS LEARNING WHERE YOU LIKE TO STAND")
 	if player.alive and arena.is_thorn_at(player.position):
@@ -525,6 +607,9 @@ func _back_to_live() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	var k := event as InputEventKey
 	if k == null or not k.pressed or k.echo:
+		return
+	if k.keycode == KEY_M:
+		synth.muted = not synth.muted
 		return
 	if replaying:
 		match k.keycode:
