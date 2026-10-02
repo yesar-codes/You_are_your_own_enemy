@@ -38,6 +38,7 @@ const PostFxScript = preload("res://scripts/post_fx.gd")
 const SynthScript = preload("res://scripts/synth.gd")
 const ShadowVoice = preload("res://scripts/shadow_voice.gd")
 const SpeechBubble = preload("res://scripts/speech_bubble.gd")
+const View3DScript = preload("res://scripts/view_3d.gd")
 
 # --- State read by the overlay ---------------------------------------------
 var model: EnsemblePredictor
@@ -89,10 +90,14 @@ var fx: FxScript
 var post_fx: PostFxScript
 var synth: SynthScript
 var voice: ShadowVoice
+var view3d: View3DScript
+var view_3d := true                     # V toggles; saved with the model
 
 # --- Internals ----------------------------------------------------------------
 var _overlay: OverlayScript
 var _camera: Camera2D
+var _arena_view: ArenaView
+var _view_layer: CanvasLayer
 var _world: Node2D                      # every simulated actor; disabled during hit-stop
 var _hitstop := 0                       # physics frames of freeze left
 var _hurt_source := ""                  # set just before main itself calls take_hit()
@@ -146,9 +151,9 @@ func _ready() -> void:
 	add_child(_camera)
 	_camera.make_current()
 
-	var arena_view := ArenaView.new()
-	arena_view.game = self
-	add_child(arena_view)
+	_arena_view = ArenaView.new()
+	_arena_view.game = self
+	add_child(_arena_view)
 
 	_world = Node2D.new()
 	add_child(_world)
@@ -170,6 +175,8 @@ func _ready() -> void:
 	fx.game = self
 	fx.camera = _camera
 	add_child(fx)
+
+	_build_3d_view()
 
 	post_fx = PostFxScript.new()
 	add_child(post_fx)
@@ -193,7 +200,48 @@ func _ready() -> void:
 	player.died.connect(_on_player_died)
 	player.hurt.connect(_on_player_hurt)
 	player.dashed.connect(_on_player_dashed)
+	_apply_view()
 	_start_run()
+
+
+## 3D view: a SubViewport over the arena area, on a canvas layer between the (hidden) 2D
+## world and the post-fx/HUD layers, so the hit shader and the panel still draw on top.
+func _build_3d_view() -> void:
+	RenderingServer.set_default_clear_color(Color(0.015, 0.015, 0.03))
+	_view_layer = CanvasLayer.new()
+	_view_layer.layer = 1
+	add_child(_view_layer)
+	var box := SubViewportContainer.new()
+	box.stretch = true
+	box.position = Cfg.ARENA.position
+	box.size = Cfg.ARENA.size
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_view_layer.add_child(box)
+	var vp := SubViewport.new()
+	vp.own_world_3d = true
+	vp.msaa_3d = Viewport.MSAA_4X
+	vp.size = Vector2i(Cfg.ARENA.size)
+	box.add_child(vp)
+	view3d = View3DScript.new()
+	view3d.game = self
+	vp.add_child(view3d)
+
+
+## Show either the 3D view or the original 2D drawing. The simulation is the same either way.
+func _apply_view() -> void:
+	_view_layer.visible = view_3d
+	view3d.set_process(view_3d)
+	_arena_view.visible = not view_3d
+	_world.visible = not view_3d
+	fx.visible = not view_3d
+	queue_redraw()
+
+
+## Where the Shadow is on screen (for the speech bubble), in either view.
+func shadow_screen_pos() -> Vector2:
+	if view_3d:
+		return view3d.screen_pos(shadow.position, 1.7)
+	return shadow.position
 
 
 ## Starts a live run, or a replay of `rec` when given.
@@ -686,6 +734,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if k.keycode == KEY_M:
 		synth.muted = not synth.muted
 		return
+	if k.keycode == KEY_V:
+		view_3d = not view_3d
+		_apply_view()
+		return
 	if replaying:
 		match k.keycode:
 			KEY_P, KEY_R, KEY_ESCAPE:
@@ -736,6 +788,7 @@ func _load_state() -> void:
 		runs = int(s.get("runs", 0))
 		planner.epsilon = clampf(float(s.get("epsilon", Cfg.EPS_START)), Cfg.EPS_MIN, 1.0)
 		model.context_mode = clampi(int(s.get("context_mode", Cfg.MODE_THREAT)), 0, Cfg.MODE_NAMES.size() - 1)
+		view_3d = bool(s.get("view_3d", true))
 		if s.get("arena_heat") is Array and s["arena_heat"].size() == ArenaShaper.CELLS:
 			_arena_memory = s["arena_heat"]
 	var best := RunRecording.from_dict(SaveManager.load_replay("best")) as RunRecording
@@ -752,6 +805,7 @@ func _save_state() -> void:
 		"epsilon": _live_planner.epsilon,
 		"context_mode": _live_model.context_mode,
 		"arena_heat": _arena_memory,
+		"view_3d": view_3d,
 	})
 
 
@@ -778,6 +832,8 @@ func _rate(window: Array) -> float:
 
 
 func _draw() -> void:
+	if view_3d:
+		return                  # the 3D view draws its own floor; the window clear colour is dark
 	draw_rect(Rect2(Vector2.ZERO, Vector2(1280.0, 720.0)), Color(0.04, 0.04, 0.07))
 	draw_rect(Cfg.ARENA, Color(0.08, 0.09, 0.13))
 	var x := Cfg.ARENA.position.x + 60.0

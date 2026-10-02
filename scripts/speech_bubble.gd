@@ -44,7 +44,7 @@ func _draw() -> void:
 	var age: float = game.voice.age
 	var fade := clampf((ShadowVoice.SHOW_TIME - age) / 0.4, 0.0, 1.0)
 
-	var anchor: Vector2 = game.shadow.position
+	var anchor: Vector2 = game.shadow_screen_pos()
 	var pos := anchor + Vector2(-size.x * 0.5, -size.y - 30.0)
 	if pos.y < Cfg.ARENA.position.y + 4.0:          # no room above: show it below the Shadow
 		pos.y = anchor.y + 30.0

@@ -24,6 +24,7 @@ godot --headless --path . --script res://tests/test_predictor.gd
 | Z | cycle context mode (history only / arena zone / threat bearing) |
 | F1 | hide/show model internals |
 | M | mute sound and music |
+| V | switch between the 3D and the 2D view |
 | R | restart run (model is kept) |
 | N | new model (wipes what it learned, the replays and the ghost) |
 | P | after game over: watch a replay of the run you just played |
@@ -32,6 +33,34 @@ godot --headless --path . --script res://tests/test_predictor.gd
 
 Red circles are aimed by the model. Blue circles are exploration shots (epsilon-greedy).
 The yellow/blue line shows the future path the Shadow *believed* you would take.
+
+## 3D view (2.5D)
+
+The game is shown in 3D by default (`scripts/view_3d.gd`, `shaders/floor.gdshader`). It's
+2.5D: the simulation is still the 2D arena plane in `main.gd`, and the 3D view only *reads*
+positions every frame and draws them. 2D pixels map to metres at 40 px/m. So the AI, replays,
+the ghost and the tests behave exactly as in 2D, and **V** switches views at any time
+(the choice is saved).
+
+What's in the 3D scene:
+
+- **Camera:** angled at 55°, following you slightly. Screen shake moves this camera.
+- **You:** a glowing capsule with a nose for your facing direction, plus dash afterimages.
+- **The Shadow:** a floating dark orb with a purple light that casts real shadows, eyes that
+  track you, and a flash when it fires.
+- **Attacks:** glowing rings on the floor with a shrinking inner ring and their own light,
+  then a column of light on impact.
+- **Arena:** thorns are 3D spikes that grow out of the floor, the blind spot is a green dome,
+  and the ghost is a see-through purple you.
+- **Floor:** dark tiles on the arena's 12x10 grid. With F1 on, the heat map glows orange in
+  the floor and the predicted paths are drawn as lines.
+- **Particles:** the same particles as in 2D, as glowing billboards. Lighting uses filmic
+  tonemapping, glow (bloom) and a little fog.
+
+The HUD panel, speech bubble (anchored to the Shadow's 3D position), game-over card and the
+hit shader stay 2D on top. The renderer is now **Forward+** (needs Vulkan; most PCs have it)
+for glow and soft shadows. To switch back, set `rendering_method` to `gl_compatibility` in
+`project.godot` and play in 2D (V).
 
 ## Replays, the Ghost Shadow and the profile card
 
@@ -133,6 +162,7 @@ much better than a uniform random guess each one predicts you
 | `scripts/game_config.gd` | Tunables and the "situation" features. |
 | `scripts/main.gd` | Game loop, observe/score/learn/predict tick, recording, replays, ghost fight, persistence. |
 | `scripts/player.gd`, `shadow.gd`, `attack.gd` | Actors. |
+| `scripts/view_3d.gd`, `shaders/floor.gdshader` | 3D presentation of the 2D simulation (V toggles). |
 | `scripts/shadow_voice.gd`, `speech_bubble.gd` | What the Shadow says (habit taunts, event lines) and the bubble. |
 | `scripts/fx.gd`, `post_fx.gd`, `synth.gd` | Particles + shake, hit shader layer, procedural sound + adaptive music. |
 | `scripts/arena_shaper.gd`, `arena_view.gd` | Learning arena: heat map, thorns, blind spot. |

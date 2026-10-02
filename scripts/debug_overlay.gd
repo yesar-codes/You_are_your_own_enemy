@@ -30,7 +30,7 @@ func _txt(s: String, pos: Vector2, size: int = 15, col: Color = C_TEXT) -> void:
 func _draw() -> void:
 	if game == null:
 		return
-	if game.show_ml:
+	if game.show_ml and not game.view_3d:     # the 3D view draws its own plan lines
 		_draw_zone_lines()
 		_draw_plan()
 	_draw_panel()
@@ -215,7 +215,7 @@ func _draw_graph(r: Rect2) -> void:
 func _draw_controls(x: float) -> void:
 	var y := PANEL.end.y - 66.0
 	_txt("WASD / arrows  move    Space  dash    M  mute", Vector2(x, y), 12, C_DIM)
-	_txt("Z  cycle context mode    F1  hide/show internals", Vector2(x, y + 15.0), 12, C_DIM)
+	_txt("Z  context    F1  internals    V  2D / 3D view", Vector2(x, y + 15.0), 12, C_DIM)
 	_txt("R  restart (model kept)    N  wipe all memory", Vector2(x, y + 30.0), 12, C_DIM)
 	_txt("P / B  watch last / best run (after game over)", Vector2(x, y + 45.0), 12, C_DIM)
 
