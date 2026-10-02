@@ -12,6 +12,8 @@ const C_ACCENT := Color(0.45, 0.85, 1.0)
 const C_WARN := Color(1.0, 0.45, 0.5)
 const C_GHOST := Color(0.8, 0.55, 1.0)
 const C_ARENA := Color(1.0, 0.6, 0.45)
+const EXPERT_COLORS := [Color(0.45, 0.85, 1.0), Color(1.0, 0.85, 0.3), Color(1.0, 0.45, 0.4)]
+const Ensemble = preload("res://scripts/ensemble_predictor.gd")
 
 var game                                # main.gd instance, set by main
 var _font: Font = ThemeDB.fallback_font
@@ -107,41 +109,60 @@ func _draw_panel() -> void:
 	y += 22.0
 	var dist: PackedFloat64Array = game.last_pred
 	var ent := ActionSpace.entropy_norm(dist) if not dist.is_empty() else 1.0
-	_txt("context: %s   [Z]" % Cfg.MODE_NAMES[game.model.context_mode], Vector2(x, y), 13)
-	y += 18.0
-	_txt("trained on %d ticks, %d contexts" % [game.model.total_updates, game.model.context_count()], Vector2(x, y), 13)
-	y += 18.0
-	_txt("prediction used: %s" % game.pred_order, Vector2(x, y), 13)
-	y += 18.0
-	_txt("epsilon (explore) %.2f   unpredictability %d%%" % [game.planner.epsilon, roundi(ent * 100.0)], Vector2(x, y), 13)
-	y += 26.0
+	_txt("context: %s [Z]   used: %s" % [Cfg.MODE_NAMES[game.model.context_mode], game.pred_order], Vector2(x, y), 12)
+	y += 16.0
+	_txt("trained on %d ticks, %d contexts" % [game.model.total_updates, game.model.context_count()], Vector2(x, y), 12)
+	y += 16.0
+	_txt("epsilon (explore) %.2f   unpredictability %d%%" % [game.planner.epsilon, roundi(ent * 100.0)], Vector2(x, y), 12)
+	y += 22.0
 
-	_txt("Predicted next action", Vector2(x, y), 14, C_ACCENT)
-	y += 18.0
+	y = _draw_experts(x, y)
+
+	_txt("Blended prediction", Vector2(x, y), 14, C_ACCENT)
+	y += 15.0
 	var best := ActionSpace.argmax(dist) if not dist.is_empty() else -1
 	for i in ActionSpace.N_ACTIONS:
 		var p: float = dist[i] if not dist.is_empty() else 0.0
 		var col := C_ACCENT if i == best else C_DIM
-		_txt(ActionSpace.NAMES[i], Vector2(x, y), 12, col)
-		draw_rect(Rect2(x + 44.0, y - 10.0, 250.0 * p, 11.0), Color(col, 0.85))
-		_txt("%d%%" % roundi(p * 100.0), Vector2(x + 302.0, y), 12, col)
-		y += 14.0
-	y += 8.0
+		_txt(ActionSpace.NAMES[i], Vector2(x, y), 11, col)
+		draw_rect(Rect2(x + 44.0, y - 8.0, 250.0 * p, 8.0), Color(col, 0.85))
+		_txt("%d%%" % roundi(p * 100.0), Vector2(x + 302.0, y), 11, col)
+		y += 12.0
+	y += 4.0
 
 	var names: Array = []
 	for a in game.history:
 		names.append(ActionSpace.NAMES[int(a)])
 	_txt("Recent: " + " > ".join(names), Vector2(x, y), 12, C_DIM)
-	y += 24.0
+	y += 20.0
 
-	_txt("Prediction accuracy (rolling %d ticks)" % Cfg.ACC_WINDOW, Vector2(x, y), 14, C_ACCENT)
-	y += 18.0
-	_txt("top-1 %d%%    top-3 %d%%    (random: 10%% / 30%%)" % [roundi(game.acc_top1 * 100.0), roundi(game.acc_top3 * 100.0)], Vector2(x, y), 13)
-	y += 8.0
-	_draw_graph(Rect2(x, y, 348.0, 58.0))
-	y += 72.0
+	_txt("top-1 %d%%  top-3 %d%%  (random 10/30)   faint = expert trust" % [roundi(game.acc_top1 * 100.0), roundi(game.acc_top3 * 100.0)], Vector2(x, y), 12)
+	y += 6.0
+	_draw_graph(Rect2(x, y, 348.0, 50.0))
+	y += 64.0
 	if game.last_run_acc >= 0.0:
 		_txt("last run avg top-1: %d%%" % roundi(game.last_run_acc * 100.0), Vector2(x, y), 12, C_DIM)
+
+
+## The three experts: Hedge weight (= how much the Shadow trusts it) and recent accuracy.
+func _draw_experts(x: float, y: float) -> float:
+	_txt("EXPERTS  (Hedge vote)", Vector2(x, y), 14, C_ACCENT)
+	_txt("trust", Vector2(x + 254.0, y), 11, C_DIM)
+	_txt("acc", Vector2(x + 308.0, y), 11, C_DIM)
+	y += 17.0
+	var m = game.model
+	var top: int = m.trusted()
+	for i in Ensemble.K:
+		var w: float = m.weights[i]
+		var col: Color = EXPERT_COLORS[i]
+		var name_col := col if i == top else Color(col, 0.6)
+		_txt((">" if i == top else " ") + Ensemble.NAMES[i], Vector2(x, y), 12, name_col)
+		draw_rect(Rect2(x + 128.0, y - 9.0, 120.0, 9.0), Color(1, 1, 1, 0.06))
+		draw_rect(Rect2(x + 128.0, y - 9.0, 120.0 * w, 9.0), Color(col, 0.85 if i == top else 0.45))
+		_txt("%3d%%" % roundi(w * 100.0), Vector2(x + 256.0, y), 12, name_col)
+		_txt("%3d%%" % roundi(float(m.expert_acc[i]) * 100.0), Vector2(x + 306.0, y), 12, C_DIM)
+		y += 15.0
+	return y + 10.0
 
 	_draw_controls(x)
 
@@ -173,6 +194,16 @@ func _draw_graph(r: Rect2) -> void:
 	var series: Array = game.acc_series
 	if series.size() < 2:
 		return
+	# Faint lines: each expert's weight over time, so you can see trust shift.
+	var ws: Array = game.weight_series
+	for e in Ensemble.K:
+		var wp := PackedVector2Array()
+		for i in ws.size():
+			var wv: PackedFloat64Array = ws[i]
+			wp.append(Vector2(r.position.x + r.size.x * float(i) / 180.0,
+					r.end.y - r.size.y * clampf(wv[e], 0.0, 1.0)))
+		if wp.size() >= 2:
+			draw_polyline(wp, Color(EXPERT_COLORS[e], 0.45), 1.0)
 	var pts := PackedVector2Array()
 	for i in series.size():
 		var px := r.position.x + r.size.x * float(i) / 180.0

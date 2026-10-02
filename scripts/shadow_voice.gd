@@ -43,6 +43,9 @@ const EVENTS := {
 	"seen_this": ["I've seen this before.", "I know this pattern.", "This again?"],
 	"acc_up1": ["I'm starting to understand you.", "Getting clearer."],
 	"acc_up2": ["I know you.", "You're an open book."],
+	"trust_ngram": ["I'm reading your patterns now.", "I've learned your sequences."],
+	"trust_repeat": ["You just keep going. I'll just follow.", "You're repeating yourself."],
+	"trust_threat": ["I'm watching how you react to me.", "I strike, you flinch. I know which way."],
 	"acc_down": ["...you're changing.", "Interesting. That's new.", "Where did that come from?"],
 }
 

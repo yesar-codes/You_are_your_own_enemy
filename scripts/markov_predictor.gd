@@ -61,7 +61,8 @@ func update(history: Array, situation: int, action: int) -> void:
 
 
 ## Probability distribution over the next action. Sets `last_order_used`.
-func predict(history: Array, situation: int) -> PackedFloat64Array:
+## `_bearing` is ignored; it keeps the interface identical to EnsemblePredictor.
+func predict(history: Array, situation: int, _bearing: int = 8) -> PackedFloat64Array:
 	var dist := PackedFloat64Array()
 	dist.resize(N)
 	var chosen := PackedFloat64Array()

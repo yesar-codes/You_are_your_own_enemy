@@ -9,13 +9,13 @@ extends RefCounted
 ##
 ## Frames are run-length encoded for saving because input rarely changes between frames.
 
-const VERSION := 3                          # 2 = learning arena, 3 = hit-stop
+const VERSION := 4                          # 2 = learning arena, 3 = hit-stop, 4 = expert ensemble
 
 var rng_seed := 0
 var tick_rate := 60
 var context_mode := 0
 var epsilon := 0.0
-var model: Dictionary = {}                  # MarkovPredictor.to_dict() at frame 0
+var model: Dictionary = {}                  # EnsemblePredictor.to_dict() at frame 0
 var ghost_frames := PackedByteArray()       # inputs of the Ghost Shadow this run faced
 var arena_heat := PackedFloat64Array()      # ArenaShaper heat at frame 0 (its long-term memory)
 var version := VERSION                      # format it was recorded with; < VERSION can't replay

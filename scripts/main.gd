@@ -6,7 +6,7 @@ extends Node2D
 ##   every TICK (10 Hz):
 ##     1. read what the player actually did            -> `action`
 ##     2. score the previous prediction against it     -> rolling accuracy
-##     3. model.update(history, situation, action)     -> learn
+##     3. model.update(history, situation, action)     -> learn (3 experts + Hedge weights)
 ##     4. predict the next action                      -> shown in the debug panel
 ##   every time the Shadow fires:
 ##     planner.plan_volley(...)  -> roll the player forward, aim where they will be
@@ -21,7 +21,7 @@ extends Node2D
 const Cfg = preload("res://scripts/game_config.gd")
 const ActionSpace = preload("res://scripts/action_space.gd")
 const InputBits = preload("res://scripts/input_bits.gd")
-const MarkovPredictor = preload("res://scripts/markov_predictor.gd")
+const EnsemblePredictor = preload("res://scripts/ensemble_predictor.gd")
 const AttackPlanner = preload("res://scripts/attack_planner.gd")
 const RunRecording = preload("res://scripts/run_recording.gd")
 const ProfileStats = preload("res://scripts/profile_stats.gd")
@@ -40,7 +40,7 @@ const ShadowVoice = preload("res://scripts/shadow_voice.gd")
 const SpeechBubble = preload("res://scripts/speech_bubble.gd")
 
 # --- State read by the overlay ---------------------------------------------
-var model: MarkovPredictor
+var model: EnsemblePredictor
 var planner: AttackPlanner
 var player: PlayerScript
 var ghost: GhostScript
@@ -59,6 +59,8 @@ var show_ml := true
 var acc_top1 := 0.0                     # rolling accuracy of the model's guesses (0..1)
 var acc_top3 := 0.0
 var acc_series: Array = []              # top-1 accuracy sampled once per second
+var weight_series: Array = []           # expert weights (PackedFloat64Array) sampled once per second
+var trusted := 0                        # expert with the highest weight (with hysteresis)
 var last_run_acc := -1.0
 var atk_rate := 0.0                     # fraction of recent strikes that landed on the player
 var last_plan: Array = []
@@ -94,6 +96,8 @@ var _camera: Camera2D
 var _world: Node2D                      # every simulated actor; disabled during hit-stop
 var _hitstop := 0                       # physics frames of freeze left
 var _hurt_source := ""                  # set just before main itself calls take_hit()
+var _weight_sum := PackedFloat64Array([0.0, 0.0, 0.0])   # for the run's average trust
+var _weight_samples := 0
 var _attacks_root: Node2D
 var _live_attacks: Array = []
 var _threats: Array = []                # centres of attacks that are still telegraphing
@@ -106,7 +110,7 @@ var _w_atk: Array = []
 var _run_hits1 := 0
 var _run_ticks := 0
 
-var _live_model: MarkovPredictor
+var _live_model: EnsemblePredictor
 var _live_planner: AttackPlanner
 var _rec: RunRecording                  # the live run being recorded
 var _best_ghost := PackedByteArray()    # inputs of the best recorded run
@@ -124,7 +128,7 @@ var _prof_zone := 4
 
 
 func _ready() -> void:
-	_live_model = MarkovPredictor.new()
+	_live_model = EnsemblePredictor.new()
 	_live_model.context_mode = Cfg.MODE_THREAT
 	_live_planner = AttackPlanner.new()
 	model = _live_model
@@ -200,7 +204,7 @@ func _start_run(rec: RunRecording = null) -> void:
 	_pending_mode = -1
 	replay_status = ""
 	if replaying:
-		model = MarkovPredictor.new()
+		model = EnsemblePredictor.new()
 		model.from_dict(rec.model)
 		model.context_mode = rec.context_mode
 		planner = AttackPlanner.new()
@@ -253,6 +257,10 @@ func _start_run(rec: RunRecording = null) -> void:
 	acc_top1 = 0.0
 	acc_top3 = 0.0
 	acc_series.clear()
+	weight_series.clear()
+	trusted = model.trusted()
+	_weight_sum = PackedFloat64Array([0.0, 0.0, 0.0])
+	_weight_samples = 0
 	atk_rate = 0.0
 	last_plan = []
 	last_plan_age = 99.0
@@ -334,8 +342,14 @@ func _physics_process(delta: float) -> void:
 	if _series_timer >= 1.0:
 		_series_timer = 0.0
 		acc_series.append(acc_top1)
+		weight_series.append(model.weights.duplicate())
 		if acc_series.size() > 180:
 			acc_series.pop_front()
+			weight_series.pop_front()
+		for i in EnsemblePredictor.K:
+			_weight_sum[i] += model.weights[i]
+		_weight_samples += 1
+		_check_trust()
 
 
 ## The 10 Hz observe -> score -> learn -> predict step.
@@ -358,7 +372,7 @@ func _on_tick() -> void:
 			_run_hits1 += 1
 
 	# 2) Learn: `action` followed `history` in `_situation`.
-	model.update(history, _situation, action)
+	model.update(history, _situation, action, _prof_bearing)
 	var dash_dir := ActionSpace.from_vector(player.dash_dir) if action == ActionSpace.DASH else -1
 	profile.record(action, _prof_bearing, _prof_near, _prof_zone, dash_dir)
 	arena.observe(player.position)
@@ -375,9 +389,9 @@ func _on_tick() -> void:
 func _refresh_prediction() -> void:
 	_threats = _collect_threats()
 	_situation = Cfg.situation_of(model.context_mode, player.position, _threats)
-	last_pred = model.predict(history, _situation)
-	pred_order = model.last_order_used
 	_prof_bearing = Cfg.threat_bearing(player.position, _threats)
+	last_pred = model.predict(history, _situation, _prof_bearing)
+	pred_order = model.last_order_used
 	_prof_zone = Cfg.zone_of(player.position)
 	_prof_near = 0
 	for t in _threats:
@@ -523,6 +537,15 @@ func _set_mode(m: int) -> void:
 	_refresh_prediction()
 
 
+## Once a second: did the Shadow switch which expert it trusts? Needs a clear lead
+## (hysteresis), so it doesn't announce every small wobble.
+func _check_trust() -> void:
+	var best := model.trusted()
+	if best != trusted and model.weights[best] > model.weights[trusted] + 0.12:
+		trusted = best
+		voice.say("trust_" + EnsemblePredictor.KEYS[best], ShadowVoice.MID)
+
+
 func _say(text: String) -> void:
 	notice = text
 	notice_age = 0.0
@@ -605,6 +628,13 @@ func _build_profile_lines() -> Array:
 		var zone := Cfg.zone_of(arena.cell_rect(arena.first_target).get_center())
 		out.append("The arena grew thorns near the %s first. You spent %d%% of the run there."
 				% [ProfileStats.ZONE_TEXT[zone], roundi(profile.zone_share(zone) * 100.0)])
+	if _weight_samples >= 5:
+		var best := 0
+		for i in EnsemblePredictor.K:
+			if _weight_sum[i] > _weight_sum[best]:
+				best = i
+		out.append("It trusted its \"%s\" brain most: %d%% of the vote on average."
+				% [EnsemblePredictor.NAMES[best], roundi(_weight_sum[best] / _weight_samples * 100.0)])
 	out.append_array(profile.lines(4 - out.size()))
 	return out
 

@@ -127,6 +127,7 @@ much better than a uniform random guess each one predicts you
 | File | Role |
 |---|---|
 | `scripts/markov_predictor.gd` | n-gram model (orders 0-4) with backoff, smoothing, forgetting, JSON save/load. No Node dependencies. |
+| `scripts/ensemble_predictor.gd` | Three experts (n-gram, repeat, threat reflex) blended by Hedge weights. |
 | `scripts/attack_planner.gd` | Autoregressive rollout, epsilon-greedy exploration, volley hedging. |
 | `scripts/action_space.gd` | The action alphabet and quantisation. |
 | `scripts/game_config.gd` | Tunables and the "situation" features. |
@@ -141,6 +142,31 @@ much better than a uniform random guess each one predicts you
 | `scripts/profile_stats.gd` | Per-run habit statistics for the game-over profile card. |
 | `scripts/debug_overlay.gd` | Prediction bars, rolling accuracy graph, plan path, replay banner, profile card. |
 | `scripts/save_manager.gd` | JSON persistence in `user://shadow_model.json` and `user://replays/`. |
+
+### Three experts that vote (Hedge)
+
+The Shadow doesn't rely on one model. `scripts/ensemble_predictor.gd` runs three experts side
+by side and blends their predictions:
+
+| Expert | Predicts | Good against |
+|---|---|---|
+| n-gram patterns | P(next \| last k actions [, situation]), the Markov model above | rhythms, zig-zags, routines |
+| repeat last move | you keep doing what you're doing | holding one direction |
+| threat reflex | P(action \| direction of the nearest circle), ignores history | fixed dodge reflexes |
+
+After every tick, each expert pays a **log-loss** for the probability it gave to what you
+actually did, scaled to 0..1. Its weight is multiplied by `exp(-ETA * loss)` (the **Hedge**
+/ multiplicative-weights algorithm). A small **fixed share** (1% per tick) mixes uniform weight
+back in, so an expert that was bad a minute ago regains trust within seconds once it's right
+again. The blended prediction is `sum_i w_i * p_i` and drives the attack planner.
+
+The panel shows each expert's weight ("trust") and its own recent top-1 accuracy, with `>`
+marking the trusted one. Faint coloured lines in the accuracy graph show the weights over
+time. The Shadow announces when it switches ("You're repeating yourself.", "I'm watching how
+you react to me."), and the profile card says which expert it trusted most during the run.
+Tunables: `ETA`, `SHARE`, `REPEAT_EPS`, `THREAT_DECAY` in `ensemble_predictor.gd`.
+
+Old saves still load: the n-gram expert keeps what it learned and the others start fresh.
 
 ### Context modes (press Z)
 

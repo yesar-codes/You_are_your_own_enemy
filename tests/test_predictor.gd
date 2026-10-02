@@ -14,6 +14,7 @@ const RunRecording = preload("res://scripts/run_recording.gd")
 const ProfileStats = preload("res://scripts/profile_stats.gd")
 const ArenaShaper = preload("res://scripts/arena_shaper.gd")
 const ShadowVoice = preload("res://scripts/shadow_voice.gd")
+const Ensemble = preload("res://scripts/ensemble_predictor.gd")
 
 var _failed := 0
 
@@ -210,6 +211,59 @@ func _init() -> void:
 	_check(found_dash, "finds: favourite dash direction")
 	_check(lines.size() <= 4, "card is capped")
 	_check(absf(prof.zone_share(4) - 1.0) < 1e-9, "zone share")
+
+	print("expert ensemble (Hedge)")
+	var ens := Ensemble.new()
+	ens.context_mode = Cfg.MODE_NONE
+	var eh: Array = []
+	for i in 300:                      # zig-zag every tick: "repeat last" is always wrong
+		var act := 0 if i % 2 == 0 else 4
+		ens.update(eh, 0, act, 8)
+		eh.append(act)
+		if eh.size() > ens.max_order:
+			eh.pop_front()
+	_check(ens.trusted() == 0, "zig-zag: trusts the n-gram expert")
+	_check(ens.weights[1] < 0.1, "zig-zag: 'repeat last' loses its vote")
+	var wsum := 0.0
+	var wmin := 1.0
+	for w in ens.weights:
+		wsum += w
+		wmin = minf(wmin, w)
+	_check(absf(wsum - 1.0) < 1e-9, "weights sum to 1")
+	_check(wmin >= Ensemble.SHARE / Ensemble.K * 0.99, "fixed share keeps every expert alive")
+	_check(ActionSpace.argmax(ens.predict(eh, 0, 8)) == (0 if int(eh.back()) == 4 else 4), "blend predicts the zig-zag")
+
+	ens = Ensemble.new()
+	ens.context_mode = Cfg.MODE_NONE   # the n-gram can't see threats in this mode
+	var trng := RandomNumberGenerator.new()
+	trng.seed = 3
+	eh = []
+	for i in 400:                      # flee directly away from a random threat direction
+		var b := trng.randi_range(0, 7)
+		var act := (b + 4) % 8
+		ens.update(eh, 0, act, b)
+		eh.append(act)
+		if eh.size() > ens.max_order:
+			eh.pop_front()
+	_check(ens.trusted() == 2, "random threats + fleeing: trusts the threat reflex")
+	_check(ActionSpace.argmax(ens.predict(eh, 0, 2)) == 6, "threat to the east -> predicts west")
+
+	var ens2 := Ensemble.new()
+	ens2.context_mode = Cfg.MODE_NONE
+	_check(ens2.from_dict(JSON.parse_string(JSON.stringify(ens.to_dict(), "", false, true))), "ensemble loads what it saved")
+	var same_e := true
+	for b in 8:
+		var pa := ens.predict(eh, 0, b)
+		var pb := ens2.predict(eh, 0, b)
+		for a in ActionSpace.N_ACTIONS:
+			if absf(pa[a] - pb[a]) > 1e-12:
+				same_e = false
+	_check(same_e, "identical blended predictions after reload")
+	var legacy := MarkovPredictor.new()
+	_train(legacy, [0, 2, 4, 2], 50)
+	var ens3 := Ensemble.new()
+	_check(ens3.from_dict(legacy.to_dict()) and ens3.total_updates == legacy.total_updates, "loads an old n-gram-only save")
+	_check(ActionSpace.argmax(ens3.ngram.predict([0, 2, 4], 0)) == 2, "old n-gram knowledge survives")
 
 	print("shadow voice")
 	var hb := prof.habits()
