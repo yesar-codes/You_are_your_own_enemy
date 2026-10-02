@@ -53,6 +53,21 @@ costs a heart (after a 1.5 s grace period). The Shadow fires about 35% less ofte
 out. The fight ends when the ghost's recording reaches the moment that run died, or after one
 round. You need one finished run before a ghost exists.
 
+**The arena learns too.** It keeps a heat map (12x10 cells) of where you stand, which slowly
+forgets and carries over between runs. Every 12 s it reshapes:
+
+- **Thorns** grow on your hottest cells: one more each time, up to 8. They blink for 1.5 s
+  first, then standing on them costs a heart.
+- A **blind spot** (green circle) opens on a cold cell at least 220 px away. Inside it the
+  Shadow's strikes can't hurt you, but only for 4 s in total. Camping there heats the cell,
+  so it tends to become the next thorns.
+
+With F1 on, the orange tint shows the heat map. The ghost passes through thorns. All the
+arena's choices come from the heat map and the run seed, so replays stay exact. Replays
+recorded before this version can't be replayed any more (the simulation changed), but they
+can still be used as the ghost. Tunables: `ARENA_*` and `POCKET_*` in `game_config.gd`.
+Code: `scripts/arena_shaper.gd` (logic) and `scripts/arena_view.gd` (drawing).
+
 **Profile card.** On game over, the card shows up to four habits the run revealed, for example
 "When a circle appears to your right, you move left 71% of the time" or "68% of your dashes
 go up". Candidates are threat reactions, behaviour when two or more circles are near, dash
@@ -83,6 +98,7 @@ much better than a uniform random guess each one predicts you
 | `scripts/game_config.gd` | Tunables and the "situation" features. |
 | `scripts/main.gd` | Game loop, observe/score/learn/predict tick, recording, replays, ghost fight, persistence. |
 | `scripts/player.gd`, `shadow.gd`, `attack.gd` | Actors. |
+| `scripts/arena_shaper.gd`, `arena_view.gd` | Learning arena: heat map, thorns, blind spot. |
 | `scripts/ghost.gd` | Ghost Shadow: the player script driven by a recorded run. |
 | `scripts/input_bits.gd` | One frame of input packed into 5 bits (the replay unit). |
 | `scripts/run_recording.gd` | Starting state + per-frame inputs, run-length encoded JSON. |

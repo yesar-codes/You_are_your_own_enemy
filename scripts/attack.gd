@@ -13,6 +13,7 @@ var radius := Cfg.ATTACK_RADIUS
 var windup := Cfg.WINDUP_START
 var explored := false
 var player                          # any node with `position`, `alive` and `take_hit()`
+var arena = null                    # ArenaShaper; a charged blind spot shelters the player
 
 var _age := 0.0
 var _striking := false
@@ -28,7 +29,7 @@ func _physics_process(delta: float) -> void:
 		_striking = true
 		resolved.emit(_inside())
 	if _striking:
-		if _inside() and player.alive:
+		if _inside() and player.alive and not (arena != null and arena.shelters(player.position)):
 			player.take_hit()
 		if _age >= windup + Cfg.STRIKE_TIME:
 			finished.emit()

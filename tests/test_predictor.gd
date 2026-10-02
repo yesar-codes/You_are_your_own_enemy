@@ -12,6 +12,7 @@ const Cfg = preload("res://scripts/game_config.gd")
 const InputBits = preload("res://scripts/input_bits.gd")
 const RunRecording = preload("res://scripts/run_recording.gd")
 const ProfileStats = preload("res://scripts/profile_stats.gd")
+const ArenaShaper = preload("res://scripts/arena_shaper.gd")
 
 var _failed := 0
 
@@ -207,6 +208,48 @@ func _init() -> void:
 	_check(found_flee, "finds: flees left from a threat on the right")
 	_check(found_dash, "finds: favourite dash direction")
 	_check(lines.size() <= 4, "card is capped")
+	_check(absf(prof.zone_share(4) - 1.0) < 1e-9, "zone share")
+
+	print("learning arena")
+	var ar := ArenaShaper.new()
+	ar.reset(PackedFloat64Array(), 7)
+	var corner := Cfg.ARENA.position + Vector2(30, 30)
+	for i in 120:
+		ar.observe(corner)
+	ar.reshape(corner)
+	var hot := ar.cell_of(corner)
+	_check(ar.thorns.has(hot) and ar.is_growing(hot), "thorns start growing on the hottest cell")
+	_check(not ar.is_thorn_at(corner), "growing thorns don't hurt yet")
+	ar.step(Cfg.ARENA_GROW_TIME + 0.01, corner)
+	_check(ar.is_thorn_at(ar.cell_rect(hot).get_center()), "grown thorns hurt")
+	_check(ar.first_target == hot, "remembers the first target for the profile card")
+	_check(ar.pocket >= 0 and not ar.thorns.has(ar.pocket), "a blind spot opens on a free cell")
+	var spot := ar.cell_rect(ar.pocket).get_center()
+	_check(spot.distance_to(corner) >= Cfg.POCKET_MIN_DIST, "blind spot is far from the player")
+	_check(ar.shelters(spot), "blind spot shelters while charged")
+	ar.step(Cfg.POCKET_SHELTER + 0.1, spot)
+	_check(not ar.shelters(spot), "blind spot runs out")
+	var mid := Cfg.ARENA.get_center()
+	for i in 400:
+		ar.observe(mid)
+	ar.reshape(mid)
+	_check(ar.thorns.has(ar.cell_of(mid)), "thorns follow the player's new habit")
+	var sh := ar.shares()
+	var total := 0.0
+	for v in sh:
+		total += float(v)
+	_check(sh.size() == ArenaShaper.CELLS and absf(total - 1.0) < 1e-9, "memory shares sum to 1")
+	var ar2 := ArenaShaper.new()
+	ar2.reset(PackedFloat64Array(), 7)
+	for i in 120:
+		ar2.observe(corner)
+	ar2.reshape(corner)
+	var ar3 := ArenaShaper.new()
+	ar3.reset(PackedFloat64Array(), 7)
+	for i in 120:
+		ar3.observe(corner)
+	ar3.reshape(corner)
+	_check(ar2.pocket == ar3.pocket and ar2.thorns.keys() == ar3.thorns.keys(), "same seed and inputs, same arena")
 
 	print("")
 	if _failed == 0:

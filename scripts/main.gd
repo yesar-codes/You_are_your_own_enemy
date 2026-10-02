@@ -14,6 +14,9 @@ extends Node2D
 ## Replays: a run is its starting state + one input value per frame (see run_recording.gd).
 ## A replay swaps in a fresh model/planner rebuilt from that state, so the live model is
 ## untouched. The Ghost Shadow boss is the input stream of your best run fed to a second body.
+##
+## The arena learns too (arena_shaper.gd): thorns grow where you stand most, a blind spot
+## opens where you never go.
 
 const Cfg = preload("res://scripts/game_config.gd")
 const ActionSpace = preload("res://scripts/action_space.gd")
@@ -22,6 +25,8 @@ const MarkovPredictor = preload("res://scripts/markov_predictor.gd")
 const AttackPlanner = preload("res://scripts/attack_planner.gd")
 const RunRecording = preload("res://scripts/run_recording.gd")
 const ProfileStats = preload("res://scripts/profile_stats.gd")
+const ArenaShaper = preload("res://scripts/arena_shaper.gd")
+const ArenaView = preload("res://scripts/arena_view.gd")
 const SaveManager = preload("res://scripts/save_manager.gd")
 const PlayerScript = preload("res://scripts/player.gd")
 const GhostScript = preload("res://scripts/ghost.gd")
@@ -70,6 +75,9 @@ var best_ghost_time := 0.0              # length of the recorded best run
 var profile: ProfileStats
 var profile_lines: Array = []
 
+var arena: ArenaShaper
+var next_reshape := Cfg.ARENA_RESHAPE_EVERY   # run_time of the next reshape
+
 # --- Internals ----------------------------------------------------------------
 var _overlay: OverlayScript
 var _attacks_root: Node2D
@@ -93,6 +101,7 @@ var _ghost_i := 0
 var _replay: RunRecording
 var _event_i := 0
 var _pending_mode := -1                 # Z press waiting for the next physics frame
+var _arena_memory: Array = []           # long-term heat shares, carried between runs
 
 # Context the current prediction was made in, as plain features for the profile card.
 var _prof_bearing := 8
@@ -107,7 +116,12 @@ func _ready() -> void:
 	model = _live_model
 	planner = _live_planner
 	profile = ProfileStats.new()
+	arena = ArenaShaper.new()
 	_load_state()
+
+	var arena_view := ArenaView.new()
+	arena_view.game = self
+	add_child(arena_view)
 
 	_attacks_root = Node2D.new()
 	add_child(_attacks_root)
@@ -149,6 +163,7 @@ func _start_run(rec: RunRecording = null) -> void:
 		planner.rng.seed = rec.rng_seed
 		_ghost_frames = rec.ghost_frames
 		replay_length = rec.frames.size()
+		arena.reset(rec.arena_heat, rec.rng_seed + 1)
 		_rec = null
 	else:
 		model = _live_model
@@ -163,11 +178,14 @@ func _start_run(rec: RunRecording = null) -> void:
 		planner.rng.seed = _rec.rng_seed
 		_ghost_frames = _best_ghost
 		_rec.ghost_frames = _ghost_frames
+		_rec.arena_heat = _initial_arena_heat()
+		arena.reset(_rec.arena_heat, _rec.rng_seed + 1)
 
 	is_over = false
 	run_time = 0.0
 	round_no = 1
 	frame = 0
+	next_reshape = Cfg.ARENA_RESHAPE_EVERY
 	_tick_acc = 0.0
 	_series_timer = 0.0
 	history.clear()
@@ -245,6 +263,9 @@ func _physics_process(delta: float) -> void:
 	_update_ghost(delta)
 	if is_over:
 		return
+	_update_arena(delta)
+	if is_over:
+		return
 
 	_tick_acc += delta
 	while _tick_acc >= Cfg.TICK:
@@ -283,6 +304,7 @@ func _on_tick() -> void:
 	model.update(history, _situation, action)
 	var dash_dir := ActionSpace.from_vector(player.dash_dir) if action == ActionSpace.DASH else -1
 	profile.record(action, _prof_bearing, _prof_near, _prof_zone, dash_dir)
+	arena.observe(player.position)
 	history.append(action)
 	if history.size() > model.max_order:
 		history.pop_front()
@@ -327,6 +349,7 @@ func _on_fire() -> void:
 		a.windup = windup
 		a.explored = p["explored"]
 		a.player = player
+		a.arena = arena
 		a.resolved.connect(_on_attack_resolved)
 		a.finished.connect(_on_attack_finished.bind(a))
 		_attacks_root.add_child(a)
@@ -353,12 +376,13 @@ func _on_player_died() -> void:
 		ghost.freeze()
 		ghost_result = "Your past self was still out there."
 	last_run_acc = float(_run_hits1) / float(maxi(1, _run_ticks))
-	profile_lines = profile.lines()
+	profile_lines = _build_profile_lines()
 	if replaying:
 		replay_status = "finished"
 		return
 
 	runs += 1
+	_arena_memory = arena.shares()
 	_rec.duration = run_time
 	var data := _rec.to_dict()
 	SaveManager.save_replay("last", data)
@@ -423,12 +447,50 @@ func _finish_ghost(text: String) -> void:
 	_say(text.to_upper())
 
 
+# --- Learning arena -------------------------------------------------------------
+
+func _update_arena(delta: float) -> void:
+	arena.step(delta, player.position)
+	if run_time >= next_reshape:
+		next_reshape += Cfg.ARENA_RESHAPE_EVERY
+		var had_thorns := not arena.thorns.is_empty()
+		arena.reshape(player.position)
+		if not had_thorns and not arena.thorns.is_empty():
+			_say("THE ARENA IS LEARNING WHERE YOU LIKE TO STAND")
+	if player.alive and arena.is_thorn_at(player.position):
+		player.take_hit()
+
+
+## Long-term heat shares scaled into tick units, so a new run starts with what the arena
+## remembers but this run's movement quickly dominates.
+func _initial_arena_heat() -> PackedFloat64Array:
+	var heat := PackedFloat64Array()
+	if _arena_memory.size() != ArenaShaper.CELLS:
+		return heat
+	for s in _arena_memory:
+		heat.append(float(s) * Cfg.ARENA_MEMORY_MASS)
+	return heat
+
+
+func _build_profile_lines() -> Array:
+	var out: Array = []
+	if arena.first_target >= 0:
+		var zone := Cfg.zone_of(arena.cell_rect(arena.first_target).get_center())
+		out.append("The arena grew thorns near the %s first. You spent %d%% of the run there."
+				% [ProfileStats.ZONE_TEXT[zone], roundi(profile.zone_share(zone) * 100.0)])
+	out.append_array(profile.lines(4 - out.size()))
+	return out
+
+
 # --- Replays --------------------------------------------------------------------
 
 func _play_replay(slot: String) -> void:
 	var rec := RunRecording.from_dict(SaveManager.load_replay(slot)) as RunRecording
 	if rec == null or rec.frames.is_empty():
 		_say("No %s run recorded yet" % slot)
+		return
+	if not rec.can_replay():
+		_say("That run was recorded by an older version")
 		return
 	if rec.tick_rate != Engine.physics_ticks_per_second:
 		push_warning("Replay was recorded at %d Hz, running at %d Hz; it may diverge."
@@ -450,7 +512,7 @@ func _end_replay(status: String) -> void:
 	ghost.freeze()
 	replay_status = status
 	last_run_acc = float(_run_hits1) / float(maxi(1, _run_ticks))
-	profile_lines = profile.lines()
+	profile_lines = _build_profile_lines()
 
 
 func _back_to_live() -> void:
@@ -485,6 +547,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			last_run_acc = -1.0
 			_best_ghost = PackedByteArray()
 			best_ghost_time = 0.0
+			_arena_memory = []
 			_start_run()
 		KEY_P:
 			if is_over:
@@ -513,6 +576,8 @@ func _load_state() -> void:
 		runs = int(s.get("runs", 0))
 		planner.epsilon = clampf(float(s.get("epsilon", Cfg.EPS_START)), Cfg.EPS_MIN, 1.0)
 		model.context_mode = clampi(int(s.get("context_mode", Cfg.MODE_THREAT)), 0, Cfg.MODE_NAMES.size() - 1)
+		if s.get("arena_heat") is Array and s["arena_heat"].size() == ArenaShaper.CELLS:
+			_arena_memory = s["arena_heat"]
 	var best := RunRecording.from_dict(SaveManager.load_replay("best")) as RunRecording
 	if best != null:
 		_best_ghost = best.frames
@@ -526,6 +591,7 @@ func _save_state() -> void:
 		"runs": runs,
 		"epsilon": _live_planner.epsilon,
 		"context_mode": _live_model.context_mode,
+		"arena_heat": _arena_memory,
 	})
 
 

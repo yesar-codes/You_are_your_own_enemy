@@ -45,7 +45,18 @@ const GHOST_MAX_SECONDS := ROUND_SECONDS
 const GHOST_FIRE_SLOWDOWN := 1.35       # Shadow volley interval multiplier while it is out
 const GHOST_HIT_DIST := PLAYER_RADIUS * 1.7
 
-const GHOST_UNAVAILABLE := 0            # no recorded best run yet
+# --- Learning arena (thorns on your favourite cells, blind spots on cold ones) ---
+const ARENA_RESHAPE_EVERY := 12.0       # seconds between reshapes (first one at 12 s)
+const ARENA_HEAT_DECAY := 0.998         # per 10 Hz tick; half-life about 35 s
+const ARENA_MEMORY_MASS := 150.0        # long-term heat carried into a run, in ticks
+const ARENA_HOT_FACTOR := 1.5           # a cell needs this many times the mean heat for thorns
+const ARENA_MAX_THORNS := 8
+const ARENA_GROW_TIME := 1.5            # warning before thorns hurt
+const ARENA_WITHER_TIME := 1.0
+const POCKET_MIN_DIST := 220.0          # a blind spot opens at least this far from you
+const POCKET_SHELTER := 4.0             # seconds of strike immunity it holds
+
+const GHOST_UNAVAILABLE := 0           # no recorded best run yet
 const GHOST_WAITING := 1
 const GHOST_ACTIVE := 2
 const GHOST_DONE := 3

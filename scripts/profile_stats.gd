@@ -66,6 +66,11 @@ func record(action: int, bearing: int, near: int, zone: int, dash_dir: int = -1)
 	_last = action
 
 
+## Fraction of recorded ticks spent in 3x3 zone `z`.
+func zone_share(z: int) -> float:
+	return float(_zones[z]) / float(ticks) if ticks > 0 and z >= 0 and z < 9 else 0.0
+
+
 ## Up to `max_lines` habit sentences, most predictable first. Empty if the run was too short.
 func lines(max_lines: int = 4) -> Array:
 	var cands: Array = []   # [score, text]

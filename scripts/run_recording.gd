@@ -9,7 +9,7 @@ extends RefCounted
 ##
 ## Frames are run-length encoded for saving because input rarely changes between frames.
 
-const VERSION := 1
+const VERSION := 2                          # 2 = has the learning arena
 
 var rng_seed := 0
 var tick_rate := 60
@@ -17,6 +17,8 @@ var context_mode := 0
 var epsilon := 0.0
 var model: Dictionary = {}                  # MarkovPredictor.to_dict() at frame 0
 var ghost_frames := PackedByteArray()       # inputs of the Ghost Shadow this run faced
+var arena_heat := PackedFloat64Array()      # ArenaShaper heat at frame 0 (its long-term memory)
+var version := VERSION                      # format it was recorded with; < VERSION can't replay
 var duration := 0.0
 var events: Array = []                      # [frame, context_mode] for each Z press
 var frames := PackedByteArray()             # InputBits per physics frame
@@ -42,16 +44,20 @@ func to_dict() -> Dictionary:
 		"events": events,
 		"frames": encode_rle(frames),
 		"ghost_frames": encode_rle(ghost_frames),
+		"arena_heat": Array(arena_heat),
 	}
 
 
-## Returns null if `d` is not a recording this version understands.
+## Returns null if `d` is not a recording this version understands. Older versions still load,
+## so their inputs can drive the ghost, but `can_replay()` is false for them.
 static func from_dict(d: Dictionary) -> RefCounted:
-	if int(d.get("version", 0)) != VERSION:
+	var v := int(d.get("version", 0))
+	if v < 1 or v > VERSION:
 		return null
 	if not (d.get("frames") is Array) or not (d.get("model") is Dictionary):
 		return null
 	var r = load("res://scripts/run_recording.gd").new()
+	r.version = v
 	r.rng_seed = int(d.get("seed", 0))
 	r.tick_rate = int(d.get("tick_rate", 60))
 	r.context_mode = int(d.get("context_mode", 0))
@@ -64,7 +70,17 @@ static func from_dict(d: Dictionary) -> RefCounted:
 	r.frames = decode_rle(d["frames"])
 	if d.get("ghost_frames") is Array:
 		r.ghost_frames = decode_rle(d["ghost_frames"])
+	if d.get("arena_heat") is Array:
+		var heat := PackedFloat64Array()
+		for h in d["arena_heat"]:
+			heat.append(float(h))
+		r.arena_heat = heat
 	return r
+
+
+## The simulation changed since older versions, so their replays would diverge.
+func can_replay() -> bool:
+	return version == VERSION
 
 
 ## [value, count, value, count, ...]

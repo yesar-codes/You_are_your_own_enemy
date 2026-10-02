@@ -11,6 +11,7 @@ const C_DIM := Color(0.55, 0.6, 0.72)
 const C_ACCENT := Color(0.45, 0.85, 1.0)
 const C_WARN := Color(1.0, 0.45, 0.5)
 const C_GHOST := Color(0.8, 0.55, 1.0)
+const C_ARENA := Color(1.0, 0.6, 0.45)
 
 var game                                # main.gd instance, set by main
 var _font: Font = ThemeDB.fallback_font
@@ -93,7 +94,9 @@ func _draw_panel() -> void:
 	_txt("red = aimed by model   blue = exploration", Vector2(x, y), 12, C_DIM)
 	y += 20.0
 	_txt(_ghost_status(), Vector2(x, y), 13, C_GHOST)
-	y += 24.0
+	y += 18.0
+	_txt(_arena_status(), Vector2(x, y), 13, C_ARENA)
+	y += 22.0
 
 	if not game.show_ml:
 		_txt("[F1] show model internals", Vector2(x, y), 14, C_DIM)
@@ -122,7 +125,7 @@ func _draw_panel() -> void:
 		_txt(ActionSpace.NAMES[i], Vector2(x, y), 12, col)
 		draw_rect(Rect2(x + 44.0, y - 10.0, 250.0 * p, 11.0), Color(col, 0.85))
 		_txt("%d%%" % roundi(p * 100.0), Vector2(x + 302.0, y), 12, col)
-		y += 15.0
+		y += 14.0
 	y += 8.0
 
 	var names: Array = []
@@ -135,12 +138,20 @@ func _draw_panel() -> void:
 	y += 18.0
 	_txt("top-1 %d%%    top-3 %d%%    (random: 10%% / 30%%)" % [roundi(game.acc_top1 * 100.0), roundi(game.acc_top3 * 100.0)], Vector2(x, y), 13)
 	y += 8.0
-	_draw_graph(Rect2(x, y, 348.0, 64.0))
-	y += 78.0
+	_draw_graph(Rect2(x, y, 348.0, 58.0))
+	y += 72.0
 	if game.last_run_acc >= 0.0:
 		_txt("last run avg top-1: %d%%" % roundi(game.last_run_acc * 100.0), Vector2(x, y), 12, C_DIM)
 
 	_draw_controls(x)
+
+
+func _arena_status() -> String:
+	var a = game.arena
+	var s := "Arena: %d thorn cells   reshapes in %.0fs" % [a.thorns.size(), maxf(0.0, game.next_reshape - game.run_time)]
+	if a.pocket >= 0 and a.pocket_charge > 0.0:
+		s += "   blind spot %.1fs" % a.pocket_charge
+	return s
 
 
 func _ghost_status() -> String:
