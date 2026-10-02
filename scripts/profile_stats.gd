@@ -73,43 +73,77 @@ func zone_share(z: int) -> float:
 
 ## Up to `max_lines` habit sentences, most predictable first. Empty if the run was too short.
 func lines(max_lines: int = 4) -> Array:
-	var cands: Array = []   # [score, text]
+	var out: Array = []
+	for h in habits():
+		if out.size() >= max_lines:
+			break
+		out.append(h["text"])
+	return out
+
+
+## Every habit that beats a random guess by at least MIN_SCORE, most predictable first.
+## Each is a Dictionary: kind ("threat" | "crowd" | "dash" | "zone" | "turn"), key (unique id),
+## score, pct, text (card sentence) and the kind's fields:
+##   threat: bearing, action    crowd: action    dash: dir    zone: zone    turn: from, to
+## The Shadow's voice (shadow_voice.gd) turns these into taunts.
+func habits() -> Array:
+	var out: Array = []
 
 	for b in 8:
 		var top := _top(_threat[b])
 		if top[2] >= MIN_SAMPLES:
-			cands.append([_score(top[1], N), "When a circle appears %s, you %s %d%% of the time."
-					% [BEARING_TEXT[b], ACTION_TEXT[top[0]], _pct(top[1])]])
+			out.append({"kind": "threat", "key": "threat:%d" % b, "score": _score(top[1], N),
+					"pct": _pct(top[1]), "bearing": b, "action": int(top[0]),
+					"text": "When a circle appears %s, you %s %d%% of the time."
+							% [BEARING_TEXT[b], ACTION_TEXT[top[0]], _pct(top[1])]})
 
 	var crowd := _top(_crowded)
 	if crowd[2] >= MIN_SAMPLES:
-		cands.append([_score(crowd[1], N), "When two or more circles are close, you %s %d%% of the time."
-				% [ACTION_TEXT[crowd[0]], _pct(crowd[1])]])
+		out.append({"kind": "crowd", "key": "crowd", "score": _score(crowd[1], N),
+				"pct": _pct(crowd[1]), "action": int(crowd[0]),
+				"text": "When two or more circles are close, you %s %d%% of the time."
+						% [ACTION_TEXT[crowd[0]], _pct(crowd[1])]})
 
 	var dash := _top(_dash_dirs)
 	if dash[2] >= 4:
-		cands.append([_score(dash[1], 8), "%d%% of your dashes go %s." % [_pct(dash[1]), DIR_TEXT[dash[0]]]])
+		out.append({"kind": "dash", "key": "dash", "score": _score(dash[1], 8),
+				"pct": _pct(dash[1]), "dir": int(dash[0]),
+				"text": "%d%% of your dashes go %s." % [_pct(dash[1]), DIR_TEXT[dash[0]]]})
 
 	var zone := _top(_zones)
 	if zone[2] >= 50:
-		cands.append([_score(zone[1], 9), "You spend %d%% of your time near the %s."
-				% [_pct(zone[1]), ZONE_TEXT[zone[0]]]])
+		out.append({"kind": "zone", "key": "zone", "score": _score(zone[1], 9),
+				"pct": _pct(zone[1]), "zone": int(zone[0]),
+				"text": "You spend %d%% of your time near the %s." % [_pct(zone[1]), ZONE_TEXT[zone[0]]]})
 
 	for a in N:
 		var t := _top(_turns[a])
 		if t[2] < MIN_SAMPLES:
 			continue
-		var from: String = "a dash" if a == ActionSpace.DASH else ("standing still" if a == ActionSpace.IDLE else "moving " + DIR_TEXT[a])
-		var to: String = "start moving " + DIR_TEXT[t[0]] if a == ActionSpace.IDLE and t[0] < 8 else ACTION_TEXT[t[0]]
-		cands.append([_score(t[1], N - 1), "After %s, you %s next %d%% of the time." % [from, to, _pct(t[1])]])
+		out.append({"kind": "turn", "key": "turn:%d" % a, "score": _score(t[1], N - 1),
+				"pct": _pct(t[1]), "from": a, "to": int(t[0]),
+				"text": "After %s, you %s next %d%% of the time."
+						% [from_text(a), to_text(a, int(t[0])), _pct(t[1])]})
 
-	cands.sort_custom(func(x: Array, y: Array) -> bool: return x[0] > y[0])
-	var out: Array = []
-	for c in cands:
-		if out.size() >= max_lines or c[0] < MIN_SCORE:
-			break
-		out.append(c[1])
+	out = out.filter(func(h: Dictionary) -> bool: return h["score"] >= MIN_SCORE)
+	out.sort_custom(func(x: Dictionary, y: Dictionary) -> bool: return x["score"] > y["score"])
 	return out
+
+
+## "a dash" / "standing still" / "moving left"
+static func from_text(a: int) -> String:
+	if a == ActionSpace.DASH:
+		return "a dash"
+	if a == ActionSpace.IDLE:
+		return "standing still"
+	return "moving " + DIR_TEXT[a]
+
+
+## What the player does after `from`: "start moving up" after standing still, else "move up".
+static func to_text(from: int, to: int) -> String:
+	if from == ActionSpace.IDLE and to < 8:
+		return "start moving " + DIR_TEXT[to]
+	return ACTION_TEXT[to]
 
 
 # --- Helpers ----------------------------------------------------------------

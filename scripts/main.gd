@@ -36,6 +36,8 @@ const OverlayScript = preload("res://scripts/debug_overlay.gd")
 const FxScript = preload("res://scripts/fx.gd")
 const PostFxScript = preload("res://scripts/post_fx.gd")
 const SynthScript = preload("res://scripts/synth.gd")
+const ShadowVoice = preload("res://scripts/shadow_voice.gd")
+const SpeechBubble = preload("res://scripts/speech_bubble.gd")
 
 # --- State read by the overlay ---------------------------------------------
 var model: MarkovPredictor
@@ -84,12 +86,14 @@ var next_reshape := Cfg.ARENA_RESHAPE_EVERY   # run_time of the next reshape
 var fx: FxScript
 var post_fx: PostFxScript
 var synth: SynthScript
+var voice: ShadowVoice
 
 # --- Internals ----------------------------------------------------------------
 var _overlay: OverlayScript
 var _camera: Camera2D
 var _world: Node2D                      # every simulated actor; disabled during hit-stop
 var _hitstop := 0                       # physics frames of freeze left
+var _hurt_source := ""                  # set just before main itself calls take_hit()
 var _attacks_root: Node2D
 var _live_attacks: Array = []
 var _threats: Array = []                # centres of attacks that are still telegraphing
@@ -127,6 +131,7 @@ func _ready() -> void:
 	planner = _live_planner
 	profile = ProfileStats.new()
 	arena = ArenaShaper.new()
+	voice = ShadowVoice.new()
 	_load_state()
 
 	# Scene layout (draw order = tree order):
@@ -171,6 +176,9 @@ func _ready() -> void:
 	_overlay = OverlayScript.new()
 	_overlay.game = self
 	hud.add_child(_overlay)
+	var bubble := SpeechBubble.new()
+	bubble.game = self
+	hud.add_child(bubble)
 
 	synth = SynthScript.new()
 	synth.game = self
@@ -224,8 +232,10 @@ func _start_run(rec: RunRecording = null) -> void:
 	frame = 0
 	next_reshape = Cfg.ARENA_RESHAPE_EVERY
 	_hitstop = 0
+	_hurt_source = ""
 	_world.process_mode = Node.PROCESS_MODE_INHERIT
 	fx.clear()
+	voice.reset(runs)
 	_tick_acc = 0.0
 	_series_timer = 0.0
 	history.clear()
@@ -414,6 +424,7 @@ func _on_attack_resolved(on_target: bool, a: Node2D) -> void:
 	fx.ring(a.position, Cfg.ATTACK_RADIUS, 22, Color(1.0, 0.75, 0.6))
 	if on_target and arena.shelters(player.position):
 		synth.chime()
+		voice.say("shelter", ShadowVoice.MID)
 		fx.burst(player.position, 16, Color(0.35, 0.95, 0.75), 180.0)
 	if is_over:
 		return
@@ -432,11 +443,37 @@ func _on_player_hurt() -> void:
 	fx.burst(player.position, 28, Color(1.0, 0.35, 0.4), 340.0)
 	post_fx.kick(1.0)
 	synth.hit()
+	if player.hp > 0:
+		voice.say(_hit_event())
+	_hurt_source = ""
+
+
+## Which voice event fits the hit that just happened.
+func _hit_event() -> String:
+	if _hurt_source != "":
+		return "hit_" + _hurt_source
+	for a in _live_attacks:
+		if is_instance_valid(a) and a.is_striking() and a.covers_player():
+			return "hit_explore" if a.explored else "hit_aimed"
+	return "hit_aimed"
 
 
 func _on_player_dashed() -> void:
 	fx.burst(player.position, 10, Color(0.45, 0.85, 1.0), 120.0, 0.3, 2.0)
 	synth.whoosh()
+	voice.on_dash(ActionSpace.from_vector(player.dash_dir))
+
+
+## The Shadow's voice runs on real time; it only reads game state.
+func _process(delta: float) -> void:
+	if is_over:
+		voice.age += delta
+		return
+	var confident := false
+	if not last_pred.is_empty():
+		var p := last_pred[ActionSpace.argmax(last_pred)]
+		confident = p > 0.6 and (pred_order.begins_with("order 3") or pred_order.begins_with("order 4"))
+	voice.update(delta, profile, acc_top1, _w1.size() >= 60, confident)
 
 
 ## Visual layers (particles) also freeze while this is true.
@@ -501,6 +538,7 @@ func _update_ghost(delta: float) -> void:
 			_refresh_interval()
 			synth.drone()
 			fx.shake(0.4)
+			voice.say("ghost_spawn")
 			fx.burst(ghost.position, 40, Color(0.8, 0.55, 1.0), 300.0, 0.7)
 			_say("YOUR BEST RUN HAS COME BACK FOR YOU")
 	elif ghost_state == Cfg.GHOST_ACTIVE:
@@ -514,7 +552,9 @@ func _update_ghost(delta: float) -> void:
 			ghost_time += delta
 			if ghost.harmless <= 0.0 and player.alive \
 					and player.position.distance_to(ghost.position) < Cfg.GHOST_HIT_DIST:
+				_hurt_source = "ghost"
 				player.take_hit()
+				_hurt_source = ""
 				if not player.alive:
 					ghost_result = "Your past self caught you."
 
@@ -525,6 +565,7 @@ func _finish_ghost(text: String) -> void:
 	ghost_result = text
 	_refresh_interval()
 	_say(text.to_upper())
+	voice.say("ghost_done")
 
 
 # --- Learning arena -------------------------------------------------------------
@@ -539,8 +580,12 @@ func _update_arena(delta: float) -> void:
 		fx.shake(0.25)
 		if not had_thorns and not arena.thorns.is_empty():
 			_say("THE ARENA IS LEARNING WHERE YOU LIKE TO STAND")
+		elif had_thorns:
+			voice.say("reshape", ShadowVoice.LOW)
 	if player.alive and arena.is_thorn_at(player.position):
+		_hurt_source = "thorns"
 		player.take_hit()
+		_hurt_source = ""
 
 
 ## Long-term heat shares scaled into tick units, so a new run starts with what the arena

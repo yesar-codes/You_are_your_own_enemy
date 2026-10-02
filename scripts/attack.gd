@@ -30,6 +30,14 @@ func is_telegraphing() -> bool:
 	return not _striking
 
 
+func is_striking() -> bool:
+	return _striking
+
+
+func covers_player() -> bool:
+	return _inside()
+
+
 func _physics_process(delta: float) -> void:
 	_age += delta
 	if not _striking and _age >= windup:

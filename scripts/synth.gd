@@ -23,6 +23,7 @@ const CHIME := 4
 const RUMBLE := 5
 const DRONE := 6
 const DEATH := 7
+const BLIP := 8
 
 const BASS_NOTES := [55.0, 55.0, 43.65, 49.0]            # A1 A1 F1 G1, one per bar
 const CHORDS := [[220.0, 261.63, 329.63], [220.0, 261.63, 329.63],
@@ -102,8 +103,14 @@ func death() -> void:
 	_add(DEATH, 1.4, 220.0, 45.0, 0.4)
 
 
+## One syllable of the Shadow's voice: a short, low, slightly random square chirp.
+func blip() -> void:
+	var f := _rng.randf_range(140.0, 200.0)
+	_add(BLIP, 0.045, f, f * 0.8, 0.09)
+
+
 func _add(kind: int, dur: float, f0: float, f1: float, vol: float) -> void:
-	if _voices.size() > 16:
+	if _voices.size() > 24:
 		_voices.pop_front()
 	_voices.append([kind, 0.0, dur, f0, f1, vol, 0.0, 0.0])
 
@@ -173,6 +180,10 @@ func _voice(v: Array, dt: float) -> float:
 		DRONE:
 			var env := sin(PI * u)
 			return (sin(TAU * ph) + sin(TAU * ph * 1.013) + 0.3 * sin(TAU * ph * 3.0)) * env * vol * 0.5
+		BLIP:
+			var env := minf(1.0, t / 0.004) * (1.0 - u)
+			var sq := 1.0 if fmod(ph, 1.0) < 0.35 else -1.0
+			return (sq * 0.5 + sin(TAU * ph * 2.0) * 0.5) * env * vol
 		DEATH:
 			var env := (1.0 - u) * minf(1.0, t / 0.02)
 			return (sin(TAU * ph) * 0.8 + _rng.randf_range(-1.0, 1.0) * 0.2 * (1.0 - u)) * env * vol

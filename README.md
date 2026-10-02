@@ -86,6 +86,22 @@ All of this is presentation only (own RNG, never read by the simulation), so rep
 exact. Hit-stop does pause the simulation, but only for a fixed number of frames after a
 hit, so it happens identically in a replay.
 
+**The Shadow talks.** A speech bubble above the Shadow, typed out with a little voice blip
+(`scripts/shadow_voice.gd`, `scripts/speech_bubble.gd`). Lines come from two places:
+
+- **Your habits.** About every 9 s it taunts you with your strongest current habit from the
+  profile stats: "A circle to your right? You'll go left.", "Back to the bottom-left corner
+  again?", "After moving right, you go down. I know." It never repeats the same habit twice
+  in a row.
+- **Events.** Being hit by an aimed strike ("I saw that coming."), by an exploration shot,
+  by thorns or by the ghost. Three dashes the same way ("Left again?"). A blind spot saving
+  you ("Hiding? I'll remember this spot."). The ghost arriving and being beaten. Its accuracy
+  rising past 42% and 60% ("I know you.") or collapsing ("...you're changing."). Being very
+  sure of a long pattern ("I've seen this before."). Your run number when you come back.
+
+Priorities stop it talking over itself: hits and the ghost may interrupt, habit taunts only
+speak after a quiet gap. It's presentation only, so replays are unaffected.
+
 **Profile card.** On game over, the card shows up to four habits the run revealed, for example
 "When a circle appears to your right, you move left 71% of the time" or "68% of your dashes
 go up". Candidates are threat reactions, behaviour when two or more circles are near, dash
@@ -116,6 +132,7 @@ much better than a uniform random guess each one predicts you
 | `scripts/game_config.gd` | Tunables and the "situation" features. |
 | `scripts/main.gd` | Game loop, observe/score/learn/predict tick, recording, replays, ghost fight, persistence. |
 | `scripts/player.gd`, `shadow.gd`, `attack.gd` | Actors. |
+| `scripts/shadow_voice.gd`, `speech_bubble.gd` | What the Shadow says (habit taunts, event lines) and the bubble. |
 | `scripts/fx.gd`, `post_fx.gd`, `synth.gd` | Particles + shake, hit shader layer, procedural sound + adaptive music. |
 | `scripts/arena_shaper.gd`, `arena_view.gd` | Learning arena: heat map, thorns, blind spot. |
 | `scripts/ghost.gd` | Ghost Shadow: the player script driven by a recorded run. |

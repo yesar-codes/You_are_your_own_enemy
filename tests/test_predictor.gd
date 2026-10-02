@@ -13,6 +13,7 @@ const InputBits = preload("res://scripts/input_bits.gd")
 const RunRecording = preload("res://scripts/run_recording.gd")
 const ProfileStats = preload("res://scripts/profile_stats.gd")
 const ArenaShaper = preload("res://scripts/arena_shaper.gd")
+const ShadowVoice = preload("res://scripts/shadow_voice.gd")
 
 var _failed := 0
 
@@ -209,6 +210,30 @@ func _init() -> void:
 	_check(found_dash, "finds: favourite dash direction")
 	_check(lines.size() <= 4, "card is capped")
 	_check(absf(prof.zone_share(4) - 1.0) < 1e-9, "zone share")
+
+	print("shadow voice")
+	var hb := prof.habits()
+	_check(not hb.is_empty() and hb[0].has("kind") and hb[0].has("score"), "profile exposes structured habits")
+	var voice := ShadowVoice.new()
+	voice.reset(0)
+	_check(voice.is_talking() and voice.line != "", "greets at run start")
+	var taunt := voice.habit_taunt(hb)
+	_check(taunt.contains("left") or taunt.contains("up"), "habit taunt is about the player's habit: " + taunt)
+	var taunt2 := voice.habit_taunt(hb)
+	_check(taunt2 != "" and taunt2 != taunt, "next taunt picks a different habit")
+	voice.reset(0)
+	voice.age = 1.5
+	_check(voice.say("hit_aimed"), "a high-priority event interrupts the greeting")
+	_check(not voice.say("seen_this", ShadowVoice.LOW), "a low-priority line doesn't interrupt")
+	voice.reset(0)
+	voice.age = 99.0
+	voice.update(0.1, prof, 0.0, false, false)
+	voice.on_dash(6)
+	voice.on_dash(6)
+	_check(not voice.line.to_lower().contains("left"), "two same dashes: no comment yet")
+	voice.on_dash(6)
+	_check(voice.line.to_lower().contains("left"), "three dashes left: 'Left again?'")
+	_check(ShadowVoice._cap("standing still") == "Standing still", "capitalises only the first letter")
 
 	print("learning arena")
 	var ar := ArenaShaper.new()
